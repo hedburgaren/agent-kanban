@@ -209,7 +209,7 @@ async def test_complete_task_via_mcp(session: AsyncSession):
 async def test_request_review_via_mcp(session: AsyncSession):
     t = await create_task(session, TaskCreate(title="x", status=TaskStatus.READY))
     await mcp.call_tool("claim_task", {"task_id": t.id, "agent": "codex"})
-    await mcp.call_tool("request_review", {"task_id": t.id, "agent": "codex"})
+    await mcp.call_tool("request_review", {"task_id": t.id, "agent": "codex", "decision": "deploy till produktion"})
     async with _fresh_session_factory()() as s:
         t2 = await get_task(s, t.id)
         assert t2.status == TaskStatus.REVIEW

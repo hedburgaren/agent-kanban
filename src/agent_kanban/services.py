@@ -404,22 +404,46 @@ async def _maybe_collect_review_diff(
     )
 
 
+REVIEW_DECISION_MIN = 10
+
+
 async def request_review(
-    session: AsyncSession, task_id: int, agent: str, summary: Optional[str] = None
+    session: AsyncSession,
+    task_id: int,
+    agent: str,
+    summary: Optional[str] = None,
+    decision: Optional[str] = None,
 ) -> Task:
+    """Review means waiting for the operator's decision, nothing else.
+
+    Verification is the agents' job (worker DoD, orchestrator check, stage
+    tests, independent verifier). A task goes to review only when a decision
+    by the operator remains (deploy to production, push to main, money or
+    VAT, published text), and `decision` names it in one line. Verified work
+    that waits for no decision is closed with complete_task.
+    """
+    if not decision or len(decision.strip()) < REVIEW_DECISION_MIN:
+        raise ValueError(
+            "request_review needs decision: one line naming the decision the "
+            "operator still has to make (for example 'deploy till produktion på "
+            "hedburgaren'). Verified work that waits for no decision is closed "
+            "with complete_task."
+        )
     task = await get_task(session, task_id)
     _check_claimer(task, agent)
     task.status = TaskStatus.REVIEW
     task.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    content = f"Väntar på beslut: {decision.strip()}"
     if summary:
-        session.add(
-            ProgressEvent(
-                task_id=task_id,
-                agent=agent,
-                kind="text",
-                payload={"content": summary},
-            )
+        content += f"\n\n{summary}"
+    session.add(
+        ProgressEvent(
+            task_id=task_id,
+            agent=agent,
+            kind="text",
+            payload={"content": content, "decision": decision.strip()},
         )
+    )
     # Phase 3: best-effort diff auto-collection.
     await _maybe_collect_review_diff(session, task, agent)
     await session.commit()

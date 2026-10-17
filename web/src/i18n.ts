@@ -457,7 +457,7 @@ const sv: Catalog = {
   "board.newTask": "+ Ny uppgift",
   "board.tip":
     "Dra kort mellan kolumnerna. Släpp i {ready} för att göra dem tillgängliga för agenter via MCP.",
-  "board.tipReady": "READY",
+  "board.tipReady": "ATT PÅBÖRJA",
   "board.allProjects": "Alla projekt",
   "board.projectFilterTooltip": "Visa uppgifter för ett projekt",
 
@@ -465,10 +465,10 @@ const sv: Catalog = {
   "column.empty": "tom",
 
   // status labels
-  "status.todo": "Att göra",
-  "status.ready": "Klar",
+  "status.todo": "Planeras",
+  "status.ready": "Att påbörja",
   "status.in_progress": "Pågår",
-  "status.review": "Granskning",
+  "status.review": "Väntar på beslut",
   "status.done": "Klar",
   "status.blocked": "Blockerad",
   "status.cancelled": "Avbruten",

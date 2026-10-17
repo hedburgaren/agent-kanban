@@ -8,6 +8,8 @@ from agent_kanban.services import (
     complete_task,
     create_task,
     get_next_task,
+    get_task,
+    list_progress_events,
     post_artifact,
     post_progress,
     request_review,
@@ -96,8 +98,30 @@ async def test_complete_task_rejects_non_claimer(session: AsyncSession):
 async def test_request_review_sets_review(session: AsyncSession):
     t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
     await claim_task(session, t.id, "codex")
-    out = await request_review(session, t.id, "codex", summary="please check")
+    out = await request_review(session, t.id, "codex", summary="please check", decision="push till main i repot")
     assert out.status == TaskStatus.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_request_review_requires_a_decision(session: AsyncSession):
+    """Review means waiting for the operator's decision; without one it is refused."""
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    for decision in (None, "", "   ", "ok"):
+        with pytest.raises(ValueError, match="complete_task"):
+            await request_review(session, t.id, "codex", summary="klart", decision=decision)
+    t2 = await get_task(session, t.id)
+    assert t2.status == TaskStatus.IN_PROGRESS
+
+
+@pytest.mark.asyncio
+async def test_request_review_records_the_decision(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    await request_review(session, t.id, "codex", summary="tester gröna", decision="deploy till produktion")
+    events = await list_progress_events(session, t.id)
+    texts = [e.payload.get("content", "") for e in events]
+    assert any(x.startswith("Väntar på beslut: deploy till produktion") for x in texts)
 
 
 @pytest.mark.asyncio
@@ -221,7 +245,7 @@ async def test_request_review_collects_diff_when_configured(session: AsyncSessio
     fake_stats = [{"path": "f.txt", "added": 1, "deleted": 1}]
     with patch("agent_kanban.services.collect_diff", new=AsyncMock(return_value=fake_diff)), \
          patch("agent_kanban.services.collect_diffstats", new=AsyncMock(return_value=fake_stats)):
-        await request_review(session, t.id, "codex", summary="review please")
+        await request_review(session, t.id, "codex", summary="review please", decision="deploy till produktion")
 
     from sqlmodel import select
     from agent_kanban.models import ProgressEvent
@@ -242,7 +266,7 @@ async def test_request_review_skips_diff_without_repo_path(session: AsyncSession
     await claim_task(session, t.id, "codex")
 
     with patch("agent_kanban.services.collect_diff", new=AsyncMock()) as mock_diff:
-        await request_review(session, t.id, "codex", summary="review please")
+        await request_review(session, t.id, "codex", summary="review please", decision="deploy till produktion")
         mock_diff.assert_not_called()
 
 
@@ -264,7 +288,7 @@ async def test_request_review_records_error_event_on_git_failure(session: AsyncS
         "agent_kanban.services.collect_diff",
         new=AsyncMock(side_effect=GitError("boom")),
     ):
-        await request_review(session, t.id, "codex", summary="review please")
+        await request_review(session, t.id, "codex", summary="review please", decision="deploy till produktion")
 
     from sqlmodel import select
     from agent_kanban.models import ProgressEvent
@@ -301,7 +325,7 @@ async def test_request_review_diff_survives_numstat_failure(session: AsyncSessio
     fake_diff = "--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-old\n+new\n"
     with patch("agent_kanban.services.collect_diff", new=AsyncMock(return_value=fake_diff)), \
          patch("agent_kanban.services.collect_diffstats", new=AsyncMock(side_effect=GitError("numstat boom"))):
-        await request_review(session, t.id, "codex", summary="review please")
+        await request_review(session, t.id, "codex", summary="review please", decision="deploy till produktion")
 
     stmt = select(ProgressEvent).where(ProgressEvent.task_id == t.id)
     result = await session.execute(stmt)

@@ -102,7 +102,7 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
             {task.created_by ? ` · ${t("card.createdBy", { name: task.created_by })}` : ""}
           </span>
         )}
-        {task.assigned_to && (
+        {task.assigned_to && !task.claimed_by && (
           <span
             className="mono"
             title={t("card.reservedTooltip")}
@@ -170,8 +170,11 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
             </div>
           )}
 
-          {/* Assignment control — operator reserves the task for one agent. */}
-          <div style={{ marginTop: 16 }}>
+          {/* Assignment control: the operator reserves the task for one agent.
+              Hidden once an agent has claimed it; the reservation no longer
+              means anything, and "anyone" next to "claimed by X" reads as a
+              contradiction. */}
+          {!task.claimed_by && <div style={{ marginTop: 16 }}>
             <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>
               {t("card.assignedTo")}
             </label>
@@ -203,7 +206,7 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
                 ))}
               </select>
             </div>
-          </div>
+          </div>}
 
           {/* Priority — drives get_next_task ordering (critical first). */}
           <div style={{ marginTop: 16 }}>

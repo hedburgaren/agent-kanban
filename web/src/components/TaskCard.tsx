@@ -122,7 +122,7 @@ export function TaskCard({
             flexWrap: "wrap",
           }}
         >
-          {task.assigned_to && (
+          {task.assigned_to && !task.claimed_by && (
             <span
               className="mono"
               title={t("task.reservedTooltip", { agent: task.assigned_to })}

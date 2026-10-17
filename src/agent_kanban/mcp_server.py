@@ -513,12 +513,21 @@ def create_mcp() -> FastMCP:
 
     @mcp.tool()
     async def request_review(
-        task_id: int, agent: str, summary: Optional[str] = None
+        task_id: int, agent: str, decision: str, summary: Optional[str] = None
     ) -> dict:
-        """Mark a task ready for review. Requires task.claimed_by == agent."""
+        """Move a task to review: it waits for the operator's DECISION, not a code review.
+
+        decision (required): one line naming what the operator still has to
+        decide, e.g. "deploy till produktion på hedburgaren", "push till main",
+        "publicera texten". Verification is ours, before this call. Verified
+        work that waits for no decision is closed with complete_task instead.
+        When the operator says yes in chat, the agent that got the yes carries
+        it out and closes the task itself, noting who said yes and when.
+        Requires task.claimed_by == agent.
+        """
         await _require_matching_agent(agent)
         async with session() as s:
-            task = await svc_request_review(s, task_id, agent, summary)
+            task = await svc_request_review(s, task_id, agent, summary, decision)
             return _task_to_dict(task)
 
     @mcp.tool()
