@@ -6,7 +6,9 @@ import { Column } from "../components/Column";
 import { NewTaskModal } from "../components/NewTaskModal";
 import { useT } from "../i18n.tsx";
 
-const COLUMNS: TaskStatus[] = ["todo", "ready", "in_progress", "review", "done", "blocked", "cancelled"];
+// The order of work (task 235): Blockerad sits next to Väntar på beslut,
+// both waiting on something outside the agents, before Klart.
+const COLUMNS: TaskStatus[] = ["todo", "ready", "in_progress", "review", "blocked", "done", "cancelled"];
 
 const PROJECT_FILTER_KEY = "kanban-project-filter";
 const SHOW_CANCELLED_KEY = "kanban-show-cancelled";
