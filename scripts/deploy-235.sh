@@ -41,7 +41,9 @@ say "4. Appen byggs om och startas (migreringarna körs vid start)"
 remote "cd $D && docker compose up -d --build --no-deps app"
 sleep 15
 remote "docker logs --since 2m agent-kanban-app-1 2>&1 | grep -iE 'alembic|migrat|error|traceback' | tail -15"
-CODE=$(remote "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7331/")
+# The board binds to the tailnet address (KANBAN_BIND_IP), not 127.0.0.1:
+# the first run stopped here on 2026-10-19 after a successful deploy.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' http://100.124.121.24:7331/ || true)
 echo "Tavlan svarar: $CODE"
 if [ "$CODE" != 200 ]; then
   echo "VARNING: tavlan svarar inte 200. Återställning: koden ur backups/code-$STAMP-before-235.tar.gz och databasen ur backups/kanban-$STAMP-before-235.dump. Säg till Klådan."
