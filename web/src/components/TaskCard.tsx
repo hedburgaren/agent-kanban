@@ -72,8 +72,24 @@ export function TaskCard({
         </span>
       </div>
 
-      {(showPriority || task.preferred_model) && (
+      {(showPriority || task.preferred_model || task.planned_date) && (
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
+          {task.planned_date && (
+            <span
+              className="mono"
+              title={t("task.plannedTooltip")}
+              style={{
+                color: "var(--text-dim)",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                padding: "1px 7px",
+                borderRadius: 999,
+                fontSize: "var(--text-small)",
+              }}
+            >
+              {t("task.planned", { date: task.planned_date })}
+            </span>
+          )}
           {showPriority && (
             <span
               className={`badge badge-${prioMeta.badge}`}
@@ -99,6 +115,16 @@ export function TaskCard({
               ◇ {task.preferred_model}
             </span>
           )}
+        </div>
+      )}
+
+      {task.status === "blocked" && task.blocked_reason && (
+        <div
+          className="badge badge-error"
+          style={{ display: "block", whiteSpace: "normal", marginBottom: 4, fontSize: "var(--text-small)" }}
+        >
+          <div>{t("task.blockedReason", { reason: task.blocked_reason })}</div>
+          {task.unblock_by && <div>{t("task.unblockBy", { who: task.unblock_by })}</div>}
         </div>
       )}
 

@@ -161,13 +161,13 @@ async def test_mcp_create_task_sets_created_by_and_fields(session):
             "title": "filed by agent",
             "description": "found a bug",
             "priority": "high",
-            "preferred_model": "glm",
+            "preferred_model": "GLM",
         },
     )
     task = _to_dict(result)
     assert task["created_by"] == "codex"
     assert task["priority"] == "high"
-    assert task["preferred_model"] == "glm"
+    assert task["preferred_model"] == "GLM"
     assert task["status"] == "todo"
     row = await session.get(Task, task["id"])
     assert row.created_by == "codex"

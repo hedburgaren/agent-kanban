@@ -6,6 +6,7 @@ import { ProgressFeed } from "../components/ProgressFeed";
 import { CommentList } from "../components/CommentList";
 import { STATUS_META } from "../statusMeta";
 import { PRIORITY_META, PRIORITY_ORDER } from "../priorityMeta";
+import { PREFERRED_MODELS } from "../models";
 import { useT, localeBcp47 } from "../i18n.tsx";
 import { prStatusLabel } from "../components/TaskCard";
 
@@ -90,6 +91,11 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
             {t(PRIORITY_META[task.priority].labelKey)}
           </span>
         )}
+        {task.planned_date && (
+          <span className="mono" title={t("task.plannedTooltip")} style={{ fontSize: "var(--text-small)" }}>
+            {t("task.planned", { date: task.planned_date })}
+          </span>
+        )}
         {task.created_at && (
           <span className="muted" style={{ fontSize: "var(--text-small)" }}>
             {t("card.created")} {new Date(task.created_at).toLocaleString(localeBcp47(locale), {
@@ -140,6 +146,28 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
           </a>
         )}
       </div>
+
+      {task.status === "blocked" && (task.blocked_reason || task.unblock_by) && (
+        <div
+          className="badge badge-error"
+          style={{ display: "block", whiteSpace: "normal", marginBottom: 20, padding: 12 }}
+        >
+          <div className="eyebrow" style={{ marginBottom: 4 }}>
+            {t("card.blockedHeading")}
+            {task.blocked_by ? ` · ${t("card.blockedBy", { name: task.blocked_by })}` : ""}
+          </div>
+          {task.blocked_reason && (
+            <div>
+              {t("card.blockedReason")}: {task.blocked_reason}
+            </div>
+          )}
+          {task.unblock_by && (
+            <div>
+              {t("card.unblockBy")}: {task.unblock_by}
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(280px, 1fr)", gap: 20 }}>
         <div style={{ minWidth: 0 }}>
@@ -265,12 +293,59 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
               style={{ width: "auto", flex: 1 }}
             >
               <option value="">{t("card.preferredNone")}</option>
-              {agents.map((a) => (
-                <option key={a} value={a}>
-                  {a}
+              {PREFERRED_MODELS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Planned date: get_next_task skips the task until this day. */}
+          <div style={{ marginTop: 16 }}>
+            <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>
+              {t("card.plannedDate")}
+            </label>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                className="input mono"
+                type="date"
+                value={task.planned_date ?? ""}
+                title={t("task.plannedTooltip")}
+                onChange={async (e) => {
+                  setActionError(null);
+                  try {
+                    await api.updateTask(taskId, {
+                      planned_date: e.target.value || null,
+                    });
+                    refresh();
+                  } catch (err) {
+                    setActionError(
+                      err instanceof Error ? err.message : t("card.error.update")
+                    );
+                  }
+                }}
+                style={{ width: "auto", flex: 1 }}
+              />
+              {task.planned_date && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={async () => {
+                    setActionError(null);
+                    try {
+                      await api.updateTask(taskId, { planned_date: null });
+                      refresh();
+                    } catch (err) {
+                      setActionError(
+                        err instanceof Error ? err.message : t("card.error.update")
+                      );
+                    }
+                  }}
+                >
+                  {t("card.plannedClear")}
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Project grouping. */}

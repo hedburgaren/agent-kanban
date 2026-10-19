@@ -1,10 +1,36 @@
 """SQLModel ORM models matching spec §4.1."""
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import Enum
 from typing import Any, Optional
 
 from sqlalchemy import Enum as SAEnum
 from sqlmodel import JSON, Column, Field, SQLModel
+
+# The only values preferred_model accepts (besides empty/null). They double as
+# the canonical agent names get_next_task matches against.
+PREFERRED_MODELS: tuple[str, ...] = ("Klådan", "Sonnet", "GLM", "Kimi")
+
+# Spellings that map onto a canonical model: used when an authenticated agent
+# name (token agent_name) is compared with preferred_model, and mirrored in the
+# 0007 data migration. Keys are lower-case.
+MODEL_ALIASES: dict[str, str] = {
+    "klådan": "Klådan",
+    "klada": "Klådan",
+    "opus": "Klådan",
+    "sonnet": "Sonnet",
+    "glm": "GLM",
+    "glammet": "GLM",
+    "kimi": "Kimi",
+    "kinesen": "Kimi",
+}
+
+
+def canonical_model(name: Optional[str]) -> Optional[str]:
+    """Map an agent name or legacy spelling to its canonical model name, or
+    return the name unchanged when it is not one of the known models."""
+    if name is None:
+        return None
+    return MODEL_ALIASES.get(name.strip().lower(), name)
 
 
 class TaskStatus(str, Enum):
@@ -69,6 +95,14 @@ class Task(SQLModel, table=True):
     # matching agent sees the task first while every other agent can still
     # claim it.
     preferred_model: Optional[str] = None
+    # Day the task is planned to run. get_next_task skips tasks planned for a
+    # future date (Europe/Stockholm); the card shows the date.
+    planned_date: Optional[date] = None
+    # Set by block_task, cleared when the task leaves blocked: who blocked it,
+    # why, and who or what releases it. The progress feed keeps the history.
+    blocked_by: Optional[str] = None
+    blocked_reason: Optional[str] = None
+    unblock_by: Optional[str] = None
     # Importance rank driving get_next_task ordering (critical first).
     priority: TaskPriority = Field(
         default=TaskPriority.MEDIUM,

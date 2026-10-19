@@ -9,6 +9,7 @@ import { useT } from "../i18n.tsx";
 const COLUMNS: TaskStatus[] = ["todo", "ready", "in_progress", "review", "done", "blocked", "cancelled"];
 
 const PROJECT_FILTER_KEY = "kanban-project-filter";
+const SHOW_CANCELLED_KEY = "kanban-show-cancelled";
 
 export function Board({ onOpenTask }: { onOpenTask: (id: number) => void }) {
   const { t } = useT();
@@ -16,6 +17,10 @@ export function Board({ onOpenTask }: { onOpenTask: (id: number) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectFilter, setProjectFilter] = useState<string>(
     () => localStorage.getItem(PROJECT_FILTER_KEY) ?? ""
+  );
+  // The cancelled column is hidden unless the filter toggle is on.
+  const [showCancelled, setShowCancelled] = useState<boolean>(
+    () => localStorage.getItem(SHOW_CANCELLED_KEY) === "1"
   );
   const [lastProgress, setLastProgress] = useState<Record<number, string>>({});
   const [showNew, setShowNew] = useState(false);
@@ -62,6 +67,15 @@ export function Board({ onOpenTask }: { onOpenTask: (id: number) => void }) {
     setProjectFilter(value);
     try {
       localStorage.setItem(PROJECT_FILTER_KEY, value);
+    } catch {
+      /* localStorage unavailable */
+    }
+  }
+
+  function changeShowCancelled(value: boolean) {
+    setShowCancelled(value);
+    try {
+      localStorage.setItem(SHOW_CANCELLED_KEY, value ? "1" : "0");
     } catch {
       /* localStorage unavailable */
     }
@@ -114,6 +128,17 @@ export function Board({ onOpenTask }: { onOpenTask: (id: number) => void }) {
               </option>
             ))}
           </select>
+          <label
+            title={t("board.showCancelledTooltip")}
+            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-small)", cursor: "pointer" }}
+          >
+            <input
+              type="checkbox"
+              checked={showCancelled}
+              onChange={(e) => changeShowCancelled(e.target.checked)}
+            />
+            {t("board.showCancelled")}
+          </label>
           <button className="btn btn-primary" onClick={() => setShowNew(true)}>
             {t("board.newTask")}
           </button>
@@ -129,7 +154,7 @@ export function Board({ onOpenTask }: { onOpenTask: (id: number) => void }) {
           minHeight: 0,
         }}
       >
-        {COLUMNS.map((status) => (
+        {COLUMNS.filter((status) => showCancelled || status !== "cancelled").map((status) => (
           <Column
             key={status}
             status={status}

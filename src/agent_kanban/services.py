@@ -3,9 +3,10 @@
 Authorization rule (spec §5.3): mutations require task.claimed_by == calling agent.
 We raise PermissionError on violation so callers can map to HTTP 403 / MCP error.
 """
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ from agent_kanban.models import (
     Task,
     TaskPriority,
     TaskStatus,
+    canonical_model,
 )
 from agent_kanban.schemas import (
     ArtifactCreate,
@@ -68,8 +70,22 @@ async def _publish_task_event(channel: str, evt_type: str, task: Task) -> None:
 
 
 # ---- Task CRUD ----
+PLANNING_TZ = ZoneInfo("Europe/Stockholm")
+
+
+def today_stockholm() -> date:
+    """Today's date in Europe/Stockholm: planned_date is compared against it."""
+    return datetime.now(PLANNING_TZ).date()
+
+
 async def create_task(session: AsyncSession, data: TaskCreate) -> Task:
-    task = Task(**data.model_dump())
+    values = data.model_dump()
+    if not values.get("repo_path") and data.project_id is not None:
+        # A task in a project works in the project's repo unless told otherwise.
+        project = await session.get(Project, data.project_id)
+        if project is not None and project.repo_path:
+            values["repo_path"] = project.repo_path
+    task = Task(**values)
     session.add(task)
     await session.commit()
     await session.refresh(task)
@@ -84,6 +100,10 @@ async def update_task(session: AsyncSession, task_id: int, data: TaskUpdate) -> 
     changes = data.model_dump(exclude_unset=True)
     for k, v in changes.items():
         setattr(task, k, v)
+    if task.status != TaskStatus.BLOCKED:
+        # Whoever moves a task off blocked (the UI, a comment) also lifts the
+        # block notes; they only describe a current block.
+        task.blocked_by = task.blocked_reason = task.unblock_by = None
     task.updated_at = datetime.now(UTC).replace(tzinfo=None)
     await session.commit()
     await session.refresh(task)
@@ -121,8 +141,10 @@ def _preference_rank(agent: Optional[str]) -> Optional["case"]:
     """
     if agent is None:
         return None
+    # Token agent names may be spelled differently from the canonical model
+    # names ("klada" for "Klådan"); compare against the canonical one.
     return case(
-        (Task.preferred_model == agent, 0),
+        (Task.preferred_model == canonical_model(agent), 0),
         (Task.preferred_model.is_(None), 1),
         else_=2,
     )
@@ -134,6 +156,8 @@ async def list_tasks(
     tags_any: Optional[list[str]] = None,
     agent: Optional[str] = None,
     project_id: Optional[int] = None,
+    planned_before: Optional[date] = None,
+    planned_after: Optional[date] = None,
 ) -> list[Task]:
     """List tasks. When ``agent`` is given (MCP path), only tasks that are
     unassigned OR assigned to that agent are returned — hard-assignment hiding.
@@ -144,6 +168,12 @@ async def list_tasks(
         stmt = stmt.where(Task.status == status)
     if project_id is not None:
         stmt = stmt.where(Task.project_id == project_id)
+    # planned_before / planned_after are inclusive; tasks without a
+    # planned_date drop out when either is set.
+    if planned_before is not None:
+        stmt = stmt.where(Task.planned_date <= planned_before)
+    if planned_after is not None:
+        stmt = stmt.where(Task.planned_date >= planned_after)
     assigned_filter = _assigned_to_or_open(agent)
     if assigned_filter is not None:
         stmt = stmt.where(assigned_filter)
@@ -173,7 +203,11 @@ async def get_next_task(
     each group by priority (critical first), then sort_order, then oldest.
     When ``agent`` is given (MCP path), only tasks unassigned OR assigned to
     that agent are eligible — other agents' reserved tasks are invisible."""
-    stmt = select(Task).where(Task.status == TaskStatus.READY)
+    stmt = select(Task).where(
+        Task.status == TaskStatus.READY,
+        # A task planned for a later day is not up for work yet.
+        (Task.planned_date.is_(None)) | (Task.planned_date <= today_stockholm()),
+    )
     assigned_filter = _assigned_to_or_open(agent)
     if assigned_filter is not None:
         stmt = stmt.where(assigned_filter)
@@ -250,6 +284,92 @@ async def release_task(session: AsyncSession, task_id: int, agent: str) -> Task:
     await session.commit()
     await session.refresh(task)
     await _publish_task_event("board", "task_released", task)
+    return task
+
+
+BLOCKABLE_STATUSES = (TaskStatus.TODO, TaskStatus.READY, TaskStatus.IN_PROGRESS)
+
+
+async def block_task(
+    session: AsyncSession,
+    task_id: int,
+    agent: str,
+    reason: str,
+    unblock_by: str,
+) -> Task:
+    """Block a task that cannot proceed. Unlike post_progress this needs no
+    claim: any authenticated agent may block a task in todo, ready or
+    in_progress (e.g. one that finds a credential missing while triaging).
+    ``reason`` says why, ``unblock_by`` who or what releases it (e.g.
+    "Chrille: skapa utvecklarkonto hos Fortnox"). Both are stored on the task
+    and as a status_change progress event."""
+    reason = (reason or "").strip()
+    unblock_by = (unblock_by or "").strip()
+    if not reason or not unblock_by:
+        raise ValueError(
+            "block_task needs both reason (why it is blocked) and unblock_by "
+            "(who or what releases it)"
+        )
+    task = await get_task(session, task_id)
+    if task.status not in BLOCKABLE_STATUSES:
+        raise ValueError(
+            f"task {task_id} is {task.status.value}; only todo, ready or "
+            "in_progress tasks can be blocked"
+        )
+    previous = task.status.value
+    task.status = TaskStatus.BLOCKED
+    task.blocked_by = agent
+    task.blocked_reason = reason
+    task.unblock_by = unblock_by
+    task.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    session.add(
+        ProgressEvent(
+            task_id=task_id,
+            agent=agent,
+            kind="status_change",
+            payload={
+                "content": f"Blockerad: {reason}\nSläpps av: {unblock_by}",
+                "status": {"from": previous, "to": "blocked", "note": reason},
+                "reason": reason,
+                "unblock_by": unblock_by,
+            },
+        )
+    )
+    await session.commit()
+    await session.refresh(task)
+    await _publish_task_event("board", "task_blocked", task)
+    return task
+
+
+async def unblock_task(
+    session: AsyncSession, task_id: int, agent: str, note: Optional[str] = None
+) -> Task:
+    """Release a blocked task: back to in_progress if an agent had claimed it,
+    otherwise to ready. Any authenticated agent may do it; the event records who."""
+    task = await get_task(session, task_id)
+    if task.status != TaskStatus.BLOCKED:
+        raise ValueError(f"task {task_id} is {task.status.value}, not blocked")
+    target = TaskStatus.IN_PROGRESS if task.claimed_by else TaskStatus.READY
+    task.status = target
+    task.blocked_by = task.blocked_reason = task.unblock_by = None
+    task.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    content = "Blockering släppt"
+    if note and note.strip():
+        content += f": {note.strip()}"
+    session.add(
+        ProgressEvent(
+            task_id=task_id,
+            agent=agent,
+            kind="status_change",
+            payload={
+                "content": content,
+                "status": {"from": "blocked", "to": target.value, "note": (note or "").strip()},
+            },
+        )
+    )
+    await session.commit()
+    await session.refresh(task)
+    await _publish_task_event("board", "task_unblocked", task)
     return task
 
 

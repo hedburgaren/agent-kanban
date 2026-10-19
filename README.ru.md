@@ -25,9 +25,10 @@ Model Context Protocol. Доска пассивна — она никогда н
 
 ## Возможности
 
-- **Pull на основе MCP** — доска предоставляет 20 инструментов (`get_next_task`,
+- **Pull на основе MCP** — доска предоставляет 22 инструмента (`get_next_task`,
   `claim_task`, `post_progress`, `request_review`, `create_task`,
-  `release_task`, `list_projects`, …) через streamable-HTTP транспорт
+  `release_task`, `block_task`, `unblock_task`, `list_projects`, …) через
+  streamable-HTTP транспорт
 - **Жёсткое назначение** — зарезервируйте задачу за конкретным агентом; другие её не видят
 - **Организация задач** — проекты, приоритет, влияющий на порядок `get_next_task`,
   мягкие подсказки предпочитаемой модели, полное создание задач агентами через MCP

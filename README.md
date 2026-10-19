@@ -25,13 +25,32 @@ MCP — no glue code per agent.
 
 ## Features
 
-- **Pull-based MCP** — board exposes 20 tools (`get_next_task`, `claim_task`,
+- **Pull-based MCP** — board exposes 22 tools (`get_next_task`, `claim_task`,
   `post_progress`, `request_review`, `create_task`, `release_task`,
-  `list_projects`, …) over the streamable-HTTP transport
+  `block_task`, `unblock_task`, `list_projects`, …) over the streamable-HTTP
+  transport
 - **Hard assignment** — reserve a task for a specific agent; others don't see it
 - **Task organization** — projects, priority that drives `get_next_task`
   ordering, soft preferred-model hints, and full agent-side task creation
   and lifecycle via MCP
+- **Preferred model**: `preferred_model` accepts only `Klådan`, `Sonnet`,
+  `GLM` or `Kimi` (or empty); anything else is rejected by the REST API and
+  the MCP tools. An agent's name is matched to these (`klada` and `Klådan`
+  both match `Klådan`).
+- **Planned date**: `planned_date` (ISO date) on a task. `get_next_task`
+  skips tasks planned for a future date (Europe/Stockholm); `list_tasks`
+  takes `planned_before` / `planned_after` (inclusive). Shown on the card.
+- **Blocking**: any authenticated agent can `block_task(task_id, agent,
+  reason, unblock_by)` a task in todo, ready or in_progress, without having
+  claimed it. Reason and "who or what releases it" are stored on the task,
+  logged as a progress event and shown on the card. `unblock_task(task_id,
+  agent, note)` returns it to ready, or to in_progress if it was claimed.
+- **Project repo**: `create_task` inherits the project's `repo_path` when
+  none is given.
+- **Board columns**: status values are unchanged; the Swedish labels are
+  Backlog (todo), Att göra (ready), Pågår, Väntar på beslut, Blockerad,
+  Klart, Avbruten. The cancelled column is hidden unless "Show cancelled"
+  is ticked.
 - **Live progress feed** — agents stream diffs, text, artifacts, errors; you
   comment back and the agent reads your feedback on the next turn
 - **Trilingual UI** — Russian / English / Swedish, with a one-click language toggle

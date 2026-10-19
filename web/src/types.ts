@@ -21,6 +21,10 @@ export interface Task {
   claimed_at: string | null;
   assigned_to: string | null;
   preferred_model: string | null;
+  planned_date: string | null; // YYYY-MM-DD
+  blocked_by: string | null;
+  blocked_reason: string | null;
+  unblock_by: string | null;
   created_by: string | null;
   sort_order: number;
   branch: string | null;

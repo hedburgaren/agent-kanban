@@ -1,4 +1,5 @@
 """REST routes for tasks (used by the UI)."""
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,11 +19,20 @@ async def get_tasks(
     status: Optional[TaskStatus] = None,
     tags_any: Optional[str] = None,
     project_id: Optional[int] = None,
+    planned_before: Optional[date] = None,
+    planned_after: Optional[date] = None,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_current_principal),
 ):
     tags = tags_any.split(",") if tags_any else None
-    return await list_tasks(session, status, tags, project_id=project_id)
+    return await list_tasks(
+        session,
+        status,
+        tags,
+        project_id=project_id,
+        planned_before=planned_before,
+        planned_after=planned_after,
+    )
 
 
 @router.post("", response_model=TaskRead, status_code=201)

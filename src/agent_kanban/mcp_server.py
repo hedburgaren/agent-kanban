@@ -20,6 +20,7 @@ routes MCP tool calls to the throwaway DB.
 """
 import contextvars
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import AsyncIterator, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -38,8 +39,11 @@ from agent_kanban.schemas import (
     ProjectCreate,
     TaskCreate,
     TaskUpdate,
+    _check_preferred_model,
 )
 from agent_kanban.services import (
+    block_task as svc_block_task,
+    unblock_task as svc_unblock_task,
     cancel_task as svc_cancel_task,
     claim_task as svc_claim_task,
     complete_task as svc_complete_task,
@@ -161,6 +165,16 @@ async def session() -> AsyncIterator[AsyncSession]:
         yield s
 
 
+def _parse_date(value: Optional[str], field: str) -> Optional[date]:
+    """Parse an ISO date (YYYY-MM-DD) tool argument; None/empty gives None."""
+    if value is None or value.strip() == "":
+        return None
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        raise ValueError(f"{field} must be an ISO date (YYYY-MM-DD), got {value!r}")
+
+
 def _task_to_dict(task) -> dict:
     return {
         "id": task.id,
@@ -173,6 +187,10 @@ def _task_to_dict(task) -> dict:
         "claimed_at": task.claimed_at.isoformat() + "Z" if task.claimed_at else None,
         "assigned_to": task.assigned_to,
         "preferred_model": task.preferred_model,
+        "planned_date": task.planned_date.isoformat() if task.planned_date else None,
+        "blocked_by": task.blocked_by,
+        "blocked_reason": task.blocked_reason,
+        "unblock_by": task.unblock_by,
         "created_by": task.created_by,
         "project_id": task.project_id,
         "sort_order": task.sort_order,
@@ -259,7 +277,10 @@ def create_mcp() -> FastMCP:
         Ordering: tasks whose preferred_model matches the calling agent come
         first, then neutral tasks, then tasks preferring another agent.
         Within each group by priority (critical first), then sort_order, then
-        oldest. Preference reorders, it never hides a task.
+        oldest. Preference reorders, it never hides a task. The calling agent's
+        name is matched to preferred_model by its canonical spelling (klada
+        matches Klådan). Tasks with a planned_date in the future
+        (Europe/Stockholm) are skipped until that day.
 
         Filters:
           tags_any: task must have at least one of these tags
@@ -300,17 +321,31 @@ def create_mcp() -> FastMCP:
         status: Optional[str] = None,
         tags_any: Optional[list[str]] = None,
         project_id: Optional[int] = None,
+        planned_before: Optional[str] = None,
+        planned_after: Optional[str] = None,
     ) -> list[dict]:
-        """List tasks, optionally filtered by status, tags and/or project. Does not claim.
+        """List tasks, optionally filtered by status, tags, project and planned date. Does not claim.
+
+        planned_before / planned_after: ISO dates (YYYY-MM-DD), inclusive. Keep
+        tasks whose planned_date is on or before / on or after the date; tasks
+        without a planned_date are left out when either is given.
 
         Only tasks that are unassigned OR assigned to the calling agent are
-        returned — tasks reserved for other agents are hidden.
+        returned; tasks reserved for other agents are hidden.
         """
         principal = await _require_any_principal()
         status_enum = TaskStatus(status) if status else None
+        before = _parse_date(planned_before, "planned_before")
+        after = _parse_date(planned_after, "planned_after")
         async with session() as s:
             tasks = await svc_list_tasks(
-                s, status_enum, tags_any, agent=principal.agent_name, project_id=project_id
+                s,
+                status_enum,
+                tags_any,
+                agent=principal.agent_name,
+                project_id=project_id,
+                planned_before=before,
+                planned_after=after,
             )
             return [_task_to_dict(t) for t in tasks]
 
@@ -336,15 +371,23 @@ def create_mcp() -> FastMCP:
         preferred_model: Optional[str] = None,
         repo_path: Optional[str] = None,
         base_branch: Optional[str] = None,
+        planned_date: Optional[str] = None,
     ) -> dict:
         """Create a task. Any authenticated agent may file one (e.g. a bug found
         while working). The task is recorded with created_by = the calling agent
         and starts in status "todo"; a human moves it to ready to release it.
 
         priority: "critical" | "high" | "medium" | "low" (default "medium")
-        preferred_model: soft hint, e.g. the agent that should ideally take it.
+        preferred_model: soft hint, one of Klådan, Sonnet, GLM, Kimi (or empty
+            for no preference); any other value is rejected.
+        planned_date: ISO date (YYYY-MM-DD). get_next_task skips the task until
+            that day (Europe/Stockholm).
+        repo_path: defaults to the project's repo_path when the task is filed
+            into a project and none is given.
         """
         await _require_matching_agent(agent)
+        preferred_model = _check_preferred_model(preferred_model)
+        planned = _parse_date(planned_date, "planned_date")
         async with session() as s:
             task = await svc_create_task(
                 s,
@@ -357,6 +400,7 @@ def create_mcp() -> FastMCP:
                     preferred_model=preferred_model,
                     repo_path=repo_path,
                     base_branch=base_branch,
+                    planned_date=planned,
                     created_by=agent,
                 ),
             )
@@ -372,13 +416,21 @@ def create_mcp() -> FastMCP:
         priority: Optional[str] = None,
         preferred_model: Optional[str] = None,
         project_id: Optional[int] = None,
+        planned_date: Optional[str] = None,
     ) -> dict:
         """Edit a task you have claimed. Only the claiming agent may update.
 
         Fields left out are left unchanged. preferred_model and priority drive
-        get_next_task ordering (see get_next_task).
+        get_next_task ordering (see get_next_task). preferred_model must be one
+        of Klådan, Sonnet, GLM, Kimi; an empty string clears it. planned_date is
+        an ISO date (YYYY-MM-DD); an empty string clears it.
         """
         await _require_matching_agent(agent)
+        # Validate before touching the DB. "" means clear; None means untouched.
+        clear_preferred = preferred_model is not None and preferred_model.strip() == ""
+        preferred_model = _check_preferred_model(preferred_model)
+        clear_planned = planned_date is not None and planned_date.strip() == ""
+        planned = _parse_date(planned_date, "planned_date")
         changes = {
             k: v
             for k, v in {
@@ -388,9 +440,14 @@ def create_mcp() -> FastMCP:
                 "priority": TaskPriority(priority) if priority else None,
                 "preferred_model": preferred_model,
                 "project_id": project_id,
+                "planned_date": planned,
             }.items()
             if v is not None
         }
+        if clear_preferred:
+            changes["preferred_model"] = None
+        if clear_planned:
+            changes["planned_date"] = None
         async with session() as s:
             task = await svc_get_task(s, task_id)
             if task.claimed_by != agent:
@@ -398,6 +455,38 @@ def create_mcp() -> FastMCP:
                     f"task {task_id} is claimed by {task.claimed_by!r}, not {agent!r}"
                 )
             task = await svc_update_task(s, task_id, TaskUpdate(**changes))
+            return _task_to_dict(task)
+
+    @mcp.tool()
+    async def block_task(
+        task_id: int, agent: str, reason: str, unblock_by: str
+    ) -> dict:
+        """Block a task that cannot proceed. Any authenticated agent may block a
+        task in todo, ready or in_progress; it need not have claimed it (the
+        blocking agent is recorded).
+
+        reason: why it is blocked.
+        unblock_by: who or what releases it, e.g. "Chrille: skapa utvecklarkonto
+            hos Fortnox". Both are required, stored on the task and shown on the
+            card, and posted as a progress event.
+
+        Status becomes blocked. unblock_task releases it.
+        """
+        await _require_matching_agent(agent)
+        async with session() as s:
+            task = await svc_block_task(s, task_id, agent, reason, unblock_by)
+            return _task_to_dict(task)
+
+    @mcp.tool()
+    async def unblock_task(
+        task_id: int, agent: str, note: Optional[str] = None
+    ) -> dict:
+        """Release a blocked task. It returns to in_progress if an agent has
+        claimed it, otherwise to ready. note (optional) says what removed the
+        block; the progress feed records who released it."""
+        await _require_matching_agent(agent)
+        async with session() as s:
+            task = await svc_unblock_task(s, task_id, agent, note)
             return _task_to_dict(task)
 
     @mcp.tool()

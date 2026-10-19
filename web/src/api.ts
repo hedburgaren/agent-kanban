@@ -30,6 +30,7 @@ export const api = {
     project_id?: number | null;
     priority?: string;
     preferred_model?: string | null;
+    planned_date?: string | null;
   }): Promise<Task> {
     return j(
       await fetch(`${BASE}/tasks`, {
@@ -52,6 +53,7 @@ export const api = {
         | "sort_order"
         | "priority"
         | "preferred_model"
+        | "planned_date"
         | "project_id"
       >
     > & {

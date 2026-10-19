@@ -1,10 +1,24 @@
 """Pydantic schemas for the API surface (REST + MCP)."""
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from agent_kanban.models import ProgressKind, TaskPriority, TaskStatus
+from agent_kanban.models import PREFERRED_MODELS, ProgressKind, TaskPriority, TaskStatus
+
+
+def _check_preferred_model(v: Optional[str]) -> Optional[str]:
+    """preferred_model is one of the four models, or empty (= no preference)."""
+    if v is None:
+        return None
+    if v.strip() == "":
+        return None
+    if v not in PREFERRED_MODELS:
+        raise ValueError(
+            f"preferred_model {v!r} is not allowed; use one of "
+            f"{', '.join(PREFERRED_MODELS)} (or empty for no preference)"
+        )
+    return v
 
 
 class ReadBase(BaseModel):
@@ -57,9 +71,16 @@ class TaskCreate(BaseModel):
     # hides the task from others.
     preferred_model: Optional[str] = None
     priority: TaskPriority = TaskPriority.MEDIUM
+    # Day the task is planned to run; get_next_task skips it until then.
+    planned_date: Optional[date] = None
     # Who filed the task. REST always overrides this server-side with the
     # authenticated principal; MCP passes the verified agent_name.
     created_by: Optional[str] = None
+
+    @field_validator("preferred_model")
+    @classmethod
+    def validate_preferred_model(cls, v: Optional[str]) -> Optional[str]:
+        return _check_preferred_model(v)
 
 
 class TaskUpdate(BaseModel):
@@ -76,9 +97,15 @@ class TaskUpdate(BaseModel):
     base_branch: Optional[str] = None
     preferred_model: Optional[str] = None
     priority: Optional[TaskPriority] = None
+    planned_date: Optional[date] = None
     # Assign / re-assign / unassign. Use model_dump(exclude_unset=True) on the
     # caller side to distinguish "not sent" from "set to null" (unassign).
     assigned_to: Optional[str] = None
+
+    @field_validator("preferred_model")
+    @classmethod
+    def validate_preferred_model(cls, v: Optional[str]) -> Optional[str]:
+        return _check_preferred_model(v)
 
 
 class TaskRead(ReadBase):
@@ -92,6 +119,10 @@ class TaskRead(ReadBase):
     claimed_at: Optional[datetime] = None
     assigned_to: Optional[str] = None
     preferred_model: Optional[str] = None
+    planned_date: Optional[date] = None
+    blocked_by: Optional[str] = None
+    blocked_reason: Optional[str] = None
+    unblock_by: Optional[str] = None
     priority: TaskPriority
     created_by: Optional[str] = None
     sort_order: float

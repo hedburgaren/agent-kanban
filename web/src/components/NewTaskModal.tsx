@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useT } from "../i18n.tsx";
 import { PRIORITY_ORDER, PRIORITY_META } from "../priorityMeta";
+import { PREFERRED_MODELS } from "../models";
 import type { Project, TaskPriority } from "../types";
 
 export function NewTaskModal({
@@ -19,6 +20,7 @@ export function NewTaskModal({
   const [baseBranch, setBaseBranch] = useState("");
   const [assignedTo, setAssignedTo] = useState<string>("");
   const [preferredModel, setPreferredModel] = useState<string>("");
+  const [plannedDate, setPlannedDate] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [agents, setAgents] = useState<string[]>([]);
@@ -51,6 +53,7 @@ export function NewTaskModal({
         ...(projectId ? { project_id: Number(projectId) } : {}),
         priority,
         ...(preferredModel ? { preferred_model: preferredModel } : { preferred_model: null }),
+        ...(plannedDate ? { planned_date: plannedDate } : {}),
       });
       onCreated(tk);
       onClose();
@@ -151,12 +154,22 @@ export function NewTaskModal({
             title={t("newTask.preferredTooltip")}
           >
             <option value="">{t("newTask.preferredNone")}</option>
-            {agents.map((a) => (
-              <option key={a} value={a}>
-                {a}
+            {PREFERRED_MODELS.map((m) => (
+              <option key={m} value={m}>
+                {m}
               </option>
             ))}
           </select>
+        </Field>
+
+        <Field label={t("newTask.plannedLabel")}>
+          <input
+            className="input mono"
+            type="date"
+            value={plannedDate}
+            onChange={(e) => setPlannedDate(e.target.value)}
+            title={t("task.plannedTooltip")}
+          />
         </Field>
 
         <Field label={t("newTask.repoLabel")}>
