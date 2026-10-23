@@ -19,6 +19,13 @@ export function createdDate(iso: string, locale: Locale): string {
   });
 }
 
+/** Who owns a block: the part of unblock_by before the first colon, comma
+ * or parenthesis ("Chrille: skapa utvecklarkonto" -> "Chrille",
+ * "Task 73 godkänt, efter ..." -> "Task 73 godkänt"). */
+export function blockOwner(unblockBy: string | null | undefined): string {
+  return (unblockBy ?? "").split(/[:,(]/)[0].trim();
+}
+
 export function TaskCard({
   task,
   lastProgressAt,
@@ -118,13 +125,30 @@ export function TaskCard({
         </div>
       )}
 
-      {task.status === "blocked" && task.blocked_reason && (
-        <div
-          className="badge badge-error"
-          style={{ display: "block", whiteSpace: "normal", marginBottom: 4, fontSize: "var(--text-small)" }}
-        >
-          <div>{t("task.blockedReason", { reason: task.blocked_reason })}</div>
-          {task.unblock_by && <div>{t("task.unblockBy", { who: task.unblock_by })}</div>}
+      {/* The card names only who owns the block; reason and how it is
+          released live on the card detail and in the tooltip. */}
+      {task.status === "blocked" && (
+        <div style={{ marginBottom: 4 }}>
+          <span
+            className="badge badge-error"
+            title={[
+              task.blocked_reason && t("task.blockedReason", { reason: task.blocked_reason }),
+              task.unblock_by && t("task.unblockBy", { who: task.unblock_by }),
+            ].filter(Boolean).join("\n")}
+            style={{
+              display: "inline-block",
+              maxWidth: "100%",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              verticalAlign: "bottom",
+              fontSize: "var(--text-small)",
+            }}
+          >
+            {blockOwner(task.unblock_by)
+              ? t("task.blockedOwner", { who: blockOwner(task.unblock_by) })
+              : t("task.blocked")}
+          </span>
         </div>
       )}
 
